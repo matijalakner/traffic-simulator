@@ -25,23 +25,24 @@ def calc_look_ahead(look_ahead: np.ndarray) -> np.ndarray:
     return calc_la
 
 
-def calc_sector(pos: np.ndarray, nump: int) -> np.ndarray:
+def calc_sector(positions: np.ndarray, sector_positions: np.ndarray) -> np.ndarray:
     """Determine the sector index for each car based on its polar position.
 
     Parameters
     ----------
     pos : np.ndarray
-        Array of circular positions (in radians).
-    nump : int
-        Total number of sector divisions/parts on the circular track.
-
+        Array of positions.
+    sector_positions : np.ndarray
+        Array of positions.
+    
     Returns
     -------
     np.ndarray
         Array of integer sector indices.
     """
-    sectors = (pos // (2 * np.pi / nump)) % nump
-    return sectors.astype(int)
+    sector = [len(sector_positions[sector_positions <= car]) for car in positions]
+    
+    return np.array(sector).astype(int)
 
 
 def s_diffs(positions: np.ndarray) -> np.ndarray:

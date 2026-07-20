@@ -1,10 +1,9 @@
 from typing import List, Union
+from .constants import CarIndex
 import numpy as np
-from .constants import CarIndex, PartIndex
-from .geometry import calc_sector
 
 class Road:
-    """Represents a ring-road simulation environment.
+    """Represents cars riding around a loop.
 
     Parameters
     ----------
@@ -12,26 +11,21 @@ class Road:
         Name of the track.
     radius : float
         The physical radius of the circular track (must be positive).
-    number_of_parts : int
-        The division partitions/sectors of the track (must be > 0).
     number_of_cars : int
         The quantity of running vehicles (must be > 0).
     v_initial : float
         Initial velocity reference for cars/limits.
-    reaction_factors : float
-        Value modeling human speed correction reaction rates.
 
     Raises
     ------
     ValueError
-        If radius, number_of_parts, or number_of_cars are invalid.
+        If radius or number_of_cars are invalid.
     """
 
     def __init__(
             self,
             name: str,
             radius: float,
-            number_of_parts: int,
             number_of_cars: int,
             v_initial: float,
     ) -> None:
@@ -39,25 +33,14 @@ class Road:
         # Constructor Argument Validation
         if radius <= 0:
             raise ValueError("Radius must be a positive number.")
-        if number_of_parts <= 0:
-            raise ValueError("Number of parts (sectors) must be a positive integer.")
         if number_of_cars <= 0:
             raise ValueError("Number of cars must be a positive integer.")
 
         self.name: str = name
         self._radius: float = radius
-        self.num_c: int = number_of_cars
-        self.num_p: int = number_of_parts
+        self.numc: int = number_of_cars
 
-        self.history: List[np.ndarray] = []
-        
-
-        self._cars: np.ndarray = self.initiate_cars(
-            numc=number_of_cars, v_initial=v_initial
-        )
-        self._parts: np.ndarray = self.initiate_parts(
-            nump=number_of_parts, v_0=v_initial
-        )
+        self._cars: np.ndarray = self.initiate_cars(numc=number_of_cars, v_initial=v_initial)
 
     # ==========================================================================
     #     Properties and Setters
@@ -83,16 +66,6 @@ class Road:
     def cars(self, new_cars_data: np.ndarray) -> None:
         """Partially update vehicle properties (positions, velocities)."""
         self._cars[[CarIndex.POSITIONS, CarIndex.VELOCITIES]] = new_cars_data
-
-    @property
-    def parts(self) -> np.ndarray:
-        """Get sectors tracking data array."""
-        return self._parts
-
-    @parts.setter
-    def parts(self, new_parts_data: np.ndarray) -> None:
-        """Set sector profiles."""
-        self._parts = new_parts_data
 
     # ==========================================================================
     #     Initialization methods
@@ -129,42 +102,9 @@ class Road:
         cars[CarIndex.BETAS] = np.random.normal(loc=10, scale=0.01, size=numc) 
         
         return cars
-
-    def initiate_parts(self, nump: int, v_0: float) -> np.ndarray:
-        """Set up track physical sector segments.
-
-        Parameters
-        ----------
-        nump : int
-            Number of parts.
-        v_0 : float
-            Initial velocity limit.
-
-        Returns
-        -------
-        np.ndarray
-            Data structure tracking segment ranges and speed limits.
-        """
-        parts = np.zeros((2, nump))
-        parts[PartIndex.ZONES] = np.linspace(0, 2 * np.pi, nump, endpoint=False)
-        parts[PartIndex.MAX_SPEEDS] = np.full(nump, v_0)
-
-        return parts
-        
-    def change_speed_limit(self, sector : int, new_speed : float) -> None:
-        """Change speed limit in one sector on the road."""
-        if sector >= self.num_p or sector < 0:
-            raise ValueError(f"Value must be between 0 and {self.num_p}.")
-        
-        avg_speed = np.average(self._parts[1])
-        old_speed = self._parts[1][sector]
-        new_speed = np.clip(new_speed, avg_speed*0.95, avg_speed*1.05)
-        
-        self._parts[1][sector] = new_speed
         
     def update_s_min(self):
         """Updates minimum distance base on the current speed and reaction time."""
         self.cars[CarIndex.MIN_DISTANCE] = self.cars[CarIndex.VELOCITIES] * self.cars[CarIndex.TAOS] / self.radius
-            
         
         

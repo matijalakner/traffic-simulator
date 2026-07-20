@@ -90,6 +90,7 @@ def calc_acc_sect(v : np.ndarray, v_sect : np.ndarray, beta : np.ndarray) -> np.
     np.ndarray
         Acceleration component derived from the sector speed adjustment.
     """
+    v_sect = np.maximum(v_sect, 1e-5)
     acc = beta * (v_sect - v) / v_sect * v
     
     return acc

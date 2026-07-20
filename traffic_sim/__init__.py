@@ -1,10 +1,13 @@
 from .road import Road
+from .linked_road import LinkedRoad, RoadSegment
 from .animation import Animation
+
 from .geometry import (
     calc_look_ahead,
     calc_sector,
     s_diffs,
 )
+
 from .physics import (
     v_diffs,
     sec_v_diffs,
@@ -17,8 +20,10 @@ from .physics import (
 )
 
 __all__ = [
-    "Road",
     "Animation",
+    "Road",
+    "LinkedRoad", 
+    "RoadSegment",
     "calc_look_ahead",
     "calc_sector",
     "s_diffs",

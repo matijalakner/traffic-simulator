@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.cm import ScalarMappable
-from .geometry import calc_sector
-
 
 class Animation:
     """
@@ -13,10 +11,10 @@ class Animation:
     Cars change color from Green (low congestion) to Red (high congestion).
     """
 
-    def __init__(self, geometric_data: List[np.ndarray]) -> None:
-        [self.radius, self.num_p, self.num_c, self.dt] = geometric_data
-        
-        self.steps = int(27 / self.dt)
+    def __init__(self, geometric_data: List[np.ndarray], lines: dict) -> None:
+        [self.radius, self.num_c, self.len, self.dt] = geometric_data
+        self.lines_data = lines
+        self.steps = int(600/ self.dt)
         
         self.history: List[np.ndarray] = []
         self.congestion_list = np.zeros((self.num_c, self.steps))
@@ -51,7 +49,14 @@ class Animation:
         self.ax.set_aspect('equal')
         self.ax.set_xlim(-radius * 1.2, radius * 1.2)
         self.ax.set_ylim(-radius * 1.2, radius * 1.2)
-        self.ax.set_title("Traffic Flow (Color = Congestion)")
+        self.ax.set_title("Traffic Flow")
+        
+        for line in self.lines_data.values():
+            (start, stop, color) = line
+            x = self.radius * np.cos(np.linspace(start, stop, 1000) / self.radius)
+            y = self.radius * np.sin(np.linspace(start, stop, 1000) / self.radius)
+            
+            plt.plot(x, y, color=color)    
 
         history_arr = np.array(self.history)
         if history_arr.size == 0:
@@ -67,16 +72,6 @@ class Animation:
             scatter = self.ax.scatter([x_cor[0]], [y_cor[0]], s=60, edgecolors='black', linewidth=0.5)
             self.animated_cars[i] = (x_cor, y_cor, scatter)
 
-        # Data Display Text
-        self.data_display = self.fig.text(
-            0.75, 0.95, 
-            'Initializing...', 
-            fontsize=9, 
-            va='top', 
-            family='monospace',
-            bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="gray", alpha=0.8)
-        )
-
         def animate(frame: int):
             # Update Car Positions and Colors
             for i in range(num_c):
@@ -84,37 +79,11 @@ class Animation:
                 idx = frame % len(x)
                 scatter.set_offsets([[x[idx], y[idx]]])
                 
-                # 2. Determine Color based on Congestion
-                # Find which sector the car is in at this frame
-                # We re-calculate sector membership based on stored history positions
                 current_pos = self.history[frame] if frame < len(self.history) else self.history[-1]
                 
-                if frame < len(self.history):
-                    
-                    # Get congestion level for that sector at this step
-                    if frame < self.congestion_list.shape[1]:
-                        level = self.congestion_list[i, frame]
-                    else:
-                        level = 0
-                    
-                    # Convert level to RGBA color
-                    color = self.scalar_map.to_rgba(level)
-                    scatter.set_facecolors([color])
-                else:
-                    scatter.set_facecolors(['gray'])
-
-            # Update Data Display
-            if frame < self.congestion_list.shape[1]:
-                current_levels = self.congestion_list[:, frame]
-                lines = [f"Frame: {frame}"]
-                for i, level in enumerate(current_levels):
-                    lines.append(f"Car {i+1}: Lvl {int(level)}")
-                self.data_display.set_text("\n".join(lines))
-            else:
-                self.data_display.set_text(f"Frame: {frame}\n(Data ended)")
 
             car_artists = tuple(self.animated_cars[i][2] for i in range(num_c))
-            return car_artists + (self.data_display,)
+            return car_artists 
         
         num_frames = len(self.history)
         ani = animation.FuncAnimation(
@@ -122,36 +91,14 @@ class Animation:
             animate,
             frames=num_frames,
             interval=1,
-            blit=False,
-            init_func=self._init_animation
+            blit=True,
         )
 
         plt.show()
-        return 0
-        
-    def _init_animation(self):
-        self.data_display.set_text('')
-        for i in range(self.num_c):
-            scatter = self.animated_cars[i][2]
-            scatter.set_facecolors([self.scalar_map.to_rgba(0)])
-        # Return None or empty tuple when blit=False
-        return () 
-
-    def note_congestion(self, step: int, s_diff: np.ndarray, s_min : np.ndarray) -> None:
-        """Notes congestion levels of 0, 0.5, 1."""        
-        level = np.zeros((self.num_c))
-        
-        for i in range(self.num_c):
-            
-            if s_diff[i] > s_min[i] * 2:
-                level[i] = 2
-            elif s_min[i] * 2 >= s_diff[i] > s_min[i]:
-                level[i] = 1
-            else:
-                level[i] = 0
-            
-            self.congestion_list[i, step] = level[i]
+        return 0 
 
     def add_history(self, position: np.ndarray) -> None:
         """Append vehicle positioning records to track frames history."""
         self.history.append(position)   
+    
+    
