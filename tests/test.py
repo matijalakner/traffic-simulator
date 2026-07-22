@@ -1,130 +1,193 @@
 import pytest
 import numpy as np
+from unittest.mock import patch
 
-from traffic_sim.constants import CarIndex, PartIndex, SegmentTypes
-from traffic_sim.road import Road
-from traffic_sim.parts import Parts
-from traffic_sim.linked_road import LinkedRoad
-import traffic_sim.physics as phys
-from traffic_sim.geometry import *
-
-# ==============================================================================
-# Physics Tests
-# ==============================================================================
-
-def test_sign_and_reactor():
-    a = np.array([5.0, 2.0])
-    b = np.array([3.0, 4.0])
-    
-    np.testing.assert_array_equal(phys.sign(a, b), [1, -1])
-    
-    # Test reactor response shape and non-zero values
-    react = phys.reactor(a, b)
-    assert react.shape == (2,)
-    assert react[0] > 0
-    assert react[1] < 0
-
-
-def test_v_diffs():
-    speeds = np.array([10.0, 15.0])
-    diffs = phys.v_diffs(speeds)
-    expected = np.array([[0.0, -5.0], [5.0, 0.0]])
-    np.testing.assert_array_almost_equal(diffs, expected)
-
-
-def test_v_check_clamping():
-    v = np.array([-5.0, 50.0, 120.0])
-    v_sect = np.array([100.0, 100.0, 100.0])
-    clamped = phys.v_check(v, v_sect)
-    
-    # Speeds clipped between 0 and 1.1 * v_sect (110.0)
-    expected = np.array([0.0, 50.0, 110.0])
-    np.testing.assert_array_almost_equal(clamped, expected)
-
-
-def test_calc_v_and_s():
-    vel = np.array([10.0])
-    acc = np.array([2.0])
-    dt = 0.5
-    radius = 100.0
-    pos = np.array([0.0])
-
-    new_vel = phys.calc_v(vel, acc, dt=dt)
-    assert new_vel[0] == 11.0
-
-    # pos + (vel * dt + 0.5 * acc * dt^2) / radius
-    # 0.0 + (10.0 * 0.5 + 0.5 * 2.0 * 0.25) / 100.0 = (5.0 + 0.25) / 100.0 = 0.0525
-    new_s = phys.calc_s(pos, vel, acc, radius, dt=dt)
-    assert pytest.approx(new_s[0], 0.0001) == 0.0525
+from traffic_sim.geometry import distance, position
+from traffic_sim.physics import (
+    sign,
+    reactor,
+    distance_acceleration,
+    sector_acceleration,
+    calculate_acceleration,
+    ei_v,
+    ei_s,
+)
+from traffic_sim.track import Track, RoadSegment
+from traffic_sim.cars import Cars
+from traffic_sim.animation import Animation
+from traffic_sim.constants import PartIndex, CarConst
 
 
 # ==============================================================================
-# Road Class Tests
+# 1. Geometry Module Tests
 # ==============================================================================
+class TestGeometry:
+    def test_distance_wrap_around(self):
+        """Test circular track distance calculation between vehicles."""
+        track_length = 100.0
+        positions = np.array([10.0, 40.0, 90.0])
+        
+        # Expected distances: (40-10)=30, (90-40)=50, (10 + 100 - 90)=20
+        expected = np.array([30.0, 50.0, 20.0])
+        calculated = distance(positions, track_length)
+        
+        np.testing.assert_allclose(calculated, expected)
 
-def test_road_init_valid():
-    road = Road(name="Test Loop", radius=100.0, number_of_cars=5, v_initial=20.0)
-    assert road.name == "Test Loop"
-    assert road.radius == 100.0
-    assert road.numc == 5
-    assert road.cars.shape == (7, 5)
-
-
-def test_road_init_invalid():
-    with pytest.raises(ValueError):
-        Road(name="Invalid Radius", radius=-10.0, number_of_cars=5, v_initial=20.0)
-
-    with pytest.raises(ValueError):
-        Road(name="Invalid Cars", radius=100.0, number_of_cars=0, v_initial=20.0)
-
-
-def test_road_radius_setter():
-    road = Road(name="Test Loop", radius=100.0, number_of_cars=5, v_initial=20.0)
-    road.radius = 150.0
-    assert road.radius == 150.0
-
-    with pytest.raises(ValueError):
-        road.radius = -5.0
-
-
-# ==============================================================================
-# Parts Class Tests
-# ==============================================================================
-
-def test_parts_init():
-    parts_track = Parts(name="Sectors Loop", radius=50.0, number_of_parts=4, number_of_cars=3, v_initial=15.0)
-    assert parts_track.nump == 4
-    assert parts_track.parts.shape == (2, 4)
-    np.testing.assert_array_equal(parts_track.parts[PartIndex.MAX_SPEEDS], [15.0, 15.0, 15.0, 15.0])
-
-
-def test_parts_invalid_parts_count():
-    with pytest.raises(ValueError):
-        Parts(name="Invalid Sector Track", radius=50.0, number_of_parts=0, number_of_cars=3, v_initial=15.0)
+    def test_position_segment_mapping(self):
+        """Test mapping car positions into road sector indexes."""
+        segment_ends = np.array([100.0, 250.0, 500.0])
+        car_positions = np.array([50.0, 150.0, 300.0])
+        
+        # 50.0 < 100 -> sector 0
+        # 150.0 is in [100, 250) -> sector 1
+        # 300.0 is in [250, 500) -> sector 2
+        expected_sectors = np.array([0, 1, 2])
+        calculated = position(car_positions, segment_ends)
+        
+        np.testing.assert_array_equal(calculated, expected_sectors)
 
 
 # ==============================================================================
-# LinkedRoad Tests
+# 2. Physics Module Tests
 # ==============================================================================
+class TestPhysics:
+    def test_sign_function(self):
+        arr1 = np.array([5, 2, 3])
+        arr2 = np.array([3, 2, 4])
+        # 5 > 3 -> 1, 2 not > 2 -> -1, 3 not > 4 -> -1
+        expected = np.array([1, -1, -1])
+        np.testing.assert_array_equal(sign(arr1, arr2), expected)
 
-def test_linked_road_building():
-    linked = LinkedRoad(name="Dynamic Track", number_of_cars=4, v_initial=25.0)
-    
-    # Initialized via default _get_segments() adding 4 segment nodes (8 sub-nodes)
-    assert linked.number_of_segments == 8
-    assert linked.segments_data.shape == (3, 8)
-    assert linked.lenght > 0
-    assert linked.radius > 0
+    def test_reactor_function(self):
+        arr1 = np.array([10.0, 20.0])
+        arr2 = np.array([5.0, 30.0])
+        res = reactor(arr1, arr2)
+        
+        assert res.shape == arr1.shape
+        assert not np.isnan(res).any()
+        assert not np.isinf(res).any()
+
+    def test_distance_acceleration_beyond_sensitivity(self):
+        """Cars beyond sensitivity distance should experience 0 car-following acceleration."""
+        s_diff = np.array([100.0, 200.0])
+        s_min = np.array([10.0, 10.0])
+        alpha = np.array([1.0, 1.0])
+        
+        acc = distance_acceleration(s_diff, s_min, alpha, sensitivity=2.5)
+        np.testing.assert_array_equal(acc, np.array([0.0, 0.0]))
+
+    def test_calculate_acceleration_combination(self):
+        acc_sect = np.array([0.5, -1.0])
+        acc_car = np.array([-0.2, 0.5])
+        
+        total_acc = calculate_acceleration(acc_sect, acc_car)
+        np.testing.assert_allclose(total_acc, np.array([0.3, -0.5]))
+
+    def test_euler_integration(self):
+        vel = np.array([10.0, 20.0])
+        acc = np.array([2.0, -4.0])
+        dt = 0.5
+        
+        # v1 = v0 + a*dt
+        v_next = ei_v(vel, acc, dt)
+        np.testing.assert_allclose(v_next, np.array([11.0, 18.0]))
+        
+        # s1 = s0 + v0*dt + 0.5*a*dt^2
+        pos = np.array([0.0, 100.0])
+        s_next = ei_s(pos, vel, acc, dt)
+        expected_s = pos + vel * dt + 0.5 * acc * (dt ** 2)
+        np.testing.assert_allclose(s_next, expected_s)
 
 
-def test_linked_road_speed_limit_change():
-    linked = LinkedRoad(name="Dynamic Track", number_of_cars=4, v_initial=25.0)
-    
-    linked.change_speed_limit(segment=0, new_speed=12.0)
-    assert linked.segments_data[PartIndex.MAX_SPEEDS][0] == 12.0
+# ==============================================================================
+# 3. Track & Road Segment Tests
+# ==============================================================================
+class TestTrack:
+    def test_road_segment_properties(self):
+        seg = RoadSegment(position=1, segment_type="highway")
+        assert seg.segment_speed == 36
+        assert seg.segment_length == 800
+        assert seg.segment_icon == "🟩 "
 
-    with pytest.raises(ValueError):
-        linked.change_speed_limit(segment=99, new_speed=10.0)
+    @patch("builtins.input", side_effect=["y"])
+    def test_predetermined_track_initialization(self, mock_input):
+        track = Track()
+        
+        assert track.number_of_segments > 0
+        assert track.length > 0
+        assert track.r == track.length / (2 * np.pi)
+        assert track.segments.shape[0] == 3  # (LENGTH, ZONES, MAX_SPEEDS)
 
-    with pytest.raises(TypeError):
-        linked.change_speed_limit(segment=0, new_speed="fast")
+    @patch("builtins.input", side_effect=["y"])
+    def test_change_speed_limit(self, mock_input):
+        track = Track()
+        initial_speed = track.segment_speeds[0]
+        
+        track.change_speed_limit(0, initial_speed + 5.0)
+        assert track.segment_speeds[0] == initial_speed + 5.0
+
+    @patch("builtins.input", side_effect=["y"])
+    def test_invalid_speed_limit_change(self, mock_input):
+        track = Track()
+        
+        with pytest.raises(ValueError):
+            track.change_speed_limit(-1, 20.0)
+            
+        with pytest.raises(TypeError):
+            track.change_speed_limit(0, "fast")
+
+
+# ==============================================================================
+# 4. Cars State Tests
+# ==============================================================================
+class TestCars:
+    @patch("builtins.input", side_effect=["y"])
+    def test_cars_initialization(self, mock_input):
+        num_cars = 5
+        v_initial = 12.0
+        dt = 0.1
+        
+        cars = Cars(number_of_cars=num_cars, v_initial=v_initial, dt=dt, name="TestRun")
+        
+        assert len(cars.positions) == num_cars
+        assert len(cars.velocities) == num_cars
+        assert np.all(cars.velocities == v_initial)
+        assert len(cars.distance_reactions) == num_cars
+
+    @patch("builtins.input", side_effect=["y"])
+    def test_invalid_car_count(self, mock_input):
+        with pytest.raises(ValueError, match="positive integer"):
+            Cars(number_of_cars=0, v_initial=10.0, dt=0.1, name="Invalid")
+
+    @patch("builtins.input", side_effect=["y"])
+    def test_positions_modulo_wrapping(self, mock_input):
+        cars = Cars(number_of_cars=4, v_initial=10.0, dt=0.1, name="WrapTest")
+        
+        # Position exceeding track length should wrap cleanly via modulo
+        overshoot_positions = np.array([cars.length + 10.0, cars.length + 50.0, 5.0, 12.0])
+        cars.positions = overshoot_positions
+        
+        expected = overshoot_positions % cars.length
+        np.testing.assert_allclose(cars.positions, expected)
+
+
+# ==============================================================================
+# 5. Animation Data Logging Tests
+# ==============================================================================
+class TestAnimation:
+    @patch("builtins.input", side_effect=["y"])
+    def test_history_logging(self, mock_input):
+        anim = Animation(name="LogTest", numc=3, dt=0.1)
+        
+        p_frame = np.array([10.0, 20.0, 30.0])
+        v_frame = np.array([5.0, 5.0, 5.0])
+        c_frame = np.array([1.0, 0.8, 1.2])
+        
+        anim.add_position_history(p_frame)
+        anim.add_speed_history(v_frame)
+        anim.add_congestion_history(c_frame)
+        
+        assert len(anim.position_history) == 1
+        assert len(anim.speed_history) == 1
+        assert len(anim.congestion_history) == 1
+        np.testing.assert_array_equal(anim.position_history[0], p_frame)
