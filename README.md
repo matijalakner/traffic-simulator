@@ -50,7 +50,7 @@ drive_sim/
 
 ### Install locally in editable mode
 ```bash
-git clone [https://github.com/Matija-del/traffic-simulator](https://github.com/Matija-del/traffic-simulator)
+git clone [https://github.com/matijalakner/traffic-simulator](https://github.com/matijalakner/traffic-simulator)
 cd drive_sim
 
 # Activate your virtual environment (if using the project venv)

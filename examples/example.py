@@ -1,6 +1,6 @@
-import traffic_sim.cars as ts
-import traffic_sim.physics as ph
-import traffic_sim.geometry as geo
+import traffic_simulator.cars as ts
+import traffic_simulator.physics as ph
+import traffic_simulator.geometry as geo
 import numpy as np
 
 
